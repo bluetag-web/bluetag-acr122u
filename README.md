@@ -1,16 +1,13 @@
 # bluetag-go
 
-Witstec B037 (3.7 寸, 240×416) 电子价签写卡 Web 服务。通过 ACR122U 读卡器
-(PN532 直连 / Escape APDU) 把图片写入 B037 价签, 编译产物为单个可执行文件
-(前端页面 go:embed 内嵌)。
-
+蓝签3.70寸电子工牌 （NFC版）写卡 Web 服务。通过 ACR122U 读卡器(PN532 直连 / Escape APDU) 把图片写入 B037 工牌, 零第三方依赖, 编译产物为单个 Windows 可执行文件。
+几年前买了这个电子工牌，那时候用华为的Mate 20刷屏显，后来换了Mate 40 Pro，NFC带不起来了，就一直闲置了，最近突然又翻出来了，就使用AI逆向了蓝签的APP，获取到了通信协议，并通过ACR122U成功写入并刷新了屏显。
 支持平台:
 
 | 平台 | PC/SC 后端 | 编译 |
 |------|-----------|------|
 | Windows | winscard.dll 直接 syscall | `make build` (无 cgo) |
 | Linux | libpcsclite (cgo) | `make build-linux`, 需 `gcc pkg-config libpcsclite-dev` |
-
 ## 快速开始
 
 ```sh
@@ -39,8 +36,7 @@ bluetag-acr122/
 └── go.mod
 ```
 
-依赖方向: `cmd → server → {imaging, tag, pn532, web}`, `tag → {pn532, pcsc}`,
-`pn532 → pcsc`; `imaging` 仅依赖标准库。
+依赖方向: `cmd → server → {imaging, tag, pn532, web}`, `tag → {pn532, pcsc}`,`pn532 → pcsc`; `imaging` 仅依赖标准库。
 
 ## 环境变量
 
@@ -51,7 +47,6 @@ bluetag-acr122/
 ## 说明
 
 - `/api/write` 不做图像处理, 由前端完成三色化; 服务端只校验 240×416 纯三色并打包写卡。
-- Windows 后端无 cgo; Linux 后端走 cgo 调 libpcsclite。
-- Linux 运行前提: `pcscd` 服务已启动且识别到读卡器 (`systemctl status pcscd`,
-  需安装 `pcscd`/`libccid` 包); Escape 命令经 `SCardControl` 发送,
-  ACR122U + libccid 默认支持。
+- Linux 平台使用libpcsclite，暂未进行验证
+- Linux 运行前提: `pcscd` 服务已启动且识别到读卡器 (`systemctl status pcscd`,  需安装 `pcscd`/`libccid` 包); Escape 命令经 `SCardControl` 发送,  ACR122U + libccid 默认支持。
+- 通信协议AI分析结果在 NFC_PROTOCOL.md 中
