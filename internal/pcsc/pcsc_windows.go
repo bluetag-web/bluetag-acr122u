@@ -1,4 +1,6 @@
-// Package pcsc — winscard.dll 直接 syscall (Windows, 无 cgo)
+//go:build windows
+
+// Package pcsc — winscard.dll 直接 syscall (无 cgo)
 // 对应 Python emul_tag.py 的直连模式: SCARD_SHARE_DIRECT + Escape IOCTL
 package pcsc
 
