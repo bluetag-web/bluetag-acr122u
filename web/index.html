@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>B037 价签写卡</title>
+<style>
+ body{font-family:system-ui;max-width:720px;margin:24px auto;padding:0 16px;background:#f5f5f5}
+ .card{background:#fff;border-radius:8px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+ img#preview{width:240px;image-rendering:pixelated;border:1px solid #ccc;background:#fff}
+ label{display:inline-block;margin-right:12px;font-size:14px}
+ button{padding:8px 20px;font-size:15px;cursor:pointer}
+ #writeBtn:disabled{opacity:.5}
+ #bar{height:18px;background:#eee;border-radius:9px;overflow:hidden}
+ #fill{height:100%;width:0;background:#2196f3;transition:width .2s}
+ #log{font:12px/1.5 monospace;max-height:180px;overflow-y:auto;white-space:pre-wrap;color:#555}
+ .err{color:#d32f2f}.ok{color:#2e7d32}
+</style>
+</head>
+<body>
+<h2>B037 (3.7寸 240×416) 价签写卡</h2>
+
+<div class="card">
+ <b>1. 选择图片</b> (处理在本页完成, 服务端只校验)<br><br>
+ <input type="file" id="file" accept="image/*">
+ <br><br>
+ <label><input type="checkbox" id="dither"> 抖动 (照片建议开)</label>
+ <label><input type="checkbox" id="stretch"> 拉伸铺满</label>
+ <label>黑白阈值 <input type="number" id="threshold" value="128" min="0" max="255" style="width:56px"></label>
+ <br><br>
+ <button id="previewBtn">生成预览</button>
+</div>
+
+<div class="card">
+ <b>2. 预览 (白/黑/红)</b><br><br>
+ <img id="preview" alt="预览"><br><br>
+ <span id="stats">—</span>
+</div>
+
+<div class="card">
+ <b>3. 写入</b> — 全程约 20 秒, 期间勿移开标签<br><br>
+ <button id="writeBtn" disabled>开始写入</button>
+ <div id="bar" style="margin-top:10px"><div id="fill"></div></div>
+ <div id="phase" style="font-size:13px;color:#666;margin-top:4px"></div>
+ <div id="log"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const W = 240, H = 416;
+let curFile = null;
+let processedBlob = null; // 前端处理后的 240x416 纯三色 PNG
+
+// ---- 前端图像处理管线 (与原服务端 ProcessImage 一致) ----
+
+// 缩放到 240x416: 拉伸铺满 或 等比缩放白底居中
+function resizeToImageData(img, stretch) {
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  if (stretch) {
+    ctx.drawImage(img, 0, 0, W, H);
+  } else {
+    const scale = Math.min(W / img.naturalWidth, H / img.naturalHeight);
+    const nw = Math.max(1, Math.round(img.naturalWidth * scale));
+    const nh = Math.max(1, Math.round(img.naturalHeight * scale));
+    ctx.drawImage(img, (W - nw) >> 1, (H - nh) >> 1, nw, nh);
+  }
+  return ctx.getImageData(0, 0, W, H);
+}
+
+// 红判定 + 灰度 + 二值化 (阈值 / Floyd-Steinberg 抖动)
+// 与服务端旧逻辑一致: 红 = R>=120 且 R-max(G,B)>=40; 红像素固定白, 不参与误差扩散
+function binarize(id, threshold, dither) {
+  const n = W * H;
+  const redM = new Uint8Array(n), gray = new Float32Array(n), whiteM = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = id.data[i*4], g = id.data[i*4+1], b = id.data[i*4+2];
+    redM[i] = (r >= 120 && r - Math.max(g, b) >= 40) ? 1 : 0;
+    gray[i] = 0.299*r + 0.587*g + 0.114*b;
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (redM[i]) { whiteM[i] = 1; continue; }
+      if (!dither) { whiteM[i] = gray[i] >= threshold ? 1 : 0; continue; }
+      const old = gray[i], nv = old < 128 ? 0 : 255;
+      whiteM[i] = nv === 255 ? 1 : 0;
+      const errd = old - nv;
+      const spread = (dx, dy, f) => {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < W && ny >= 0 && ny < H && !redM[ny * W + nx])
+          gray[ny * W + nx] += errd * f;
+      };
+      spread(1, 0, 7/16); spread(-1, 1, 3/16); spread(0, 1, 5/16); spread(1, 1, 1/16);
+    }
+  }
+  return {redM, whiteM};
+}
+
+// 量化为纯三色 (白/黑/红), 返回画布与统计; 红像素在 BW 通道计白 (与服务端一致)
+function quantize(m) {
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const id = ctx.createImageData(W, H);
+  let white = 0, black = 0, red = 0;
+  for (let i = 0; i < W * H; i++) {
+    let r, g, b;
+    if (m.redM[i])      { r = 255; g = 0; b = 0; red++; white++; }
+    else if (m.whiteM[i]) { r = g = b = 255; white++; }
+    else                { r = g = b = 0; black++; }
+    id.data[i*4] = r; id.data[i*4+1] = g; id.data[i*4+2] = b; id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+  return {canvas, white, black, red};
+}
+
+async function processCurrentFile() {
+  if (!curFile) throw new Error("先选图片");
+  const img = new Image();
+  img.src = URL.createObjectURL(curFile);
+  await img.decode();
+  const id = resizeToImageData(img, $("stretch").checked);
+  const m = binarize(id, +$("threshold").value || 128, $("dither").checked);
+  const q = quantize(m);
+  processedBlob = await new Promise(res => q.canvas.toBlob(res, "image/png"));
+  $("preview").src = q.canvas.toDataURL("image/png");
+  $("stats").textContent = `白 ${q.white} / 黑 ${q.black} / 红 ${q.red} 像素`;
+  $("writeBtn").disabled = false;
+}
+
+function formData() {
+  const fd = new FormData();
+  fd.append("image", processedBlob, "design.png");
+  return fd;
+}
+
+$("file").addEventListener("change", e => {
+  curFile = e.target.files[0] || null;
+  processedBlob = null;
+  $("writeBtn").disabled = true;
+  $("preview").removeAttribute("src");
+  $("stats").textContent = "—";
+});
+
+$("previewBtn").onclick = async () => {
+  try {
+    await processCurrentFile();
+  } catch (e) {
+    alert("失败: " + e.message);
+  }
+};
+
+const phaseName = {reset:"断电复位", activate:"激活标签", handshake:"握手",
+  BW:"写黑白通道", RD:"写红色通道", refresh:"触发刷新", hold:"保场刷新中"};
+const totalUnits = {reset:1, activate:1, handshake:1, BW:52, RD:52, refresh:1};
+
+function setProgress(phase, done, total) {
+  const units = 1+1+1+52+52+1+15; // 各阶段权重粗略合计
+  const doneUnits = {reset:0,activate:1,handshake:2,BW:3,RD:55,refresh:107,hold:108};
+  let pct;
+  if (phase === "hold") pct = 95 + (total-done)/total*5;
+  else pct = (doneUnits[phase] + done) / (units+15) * 95;
+  $("fill").style.width = pct.toFixed(1) + "%";
+  $("phase").textContent = phaseName[phase] || phase +
+    (total > 1 ? ` ${done}/${total}` : "");
+}
+
+function appendLog(msg, cls) {
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = msg;
+  $("log").appendChild(div);
+  $("log").scrollTop = 1e9;
+}
+
+$("writeBtn").onclick = async () => {
+  $("writeBtn").disabled = true;
+  $("log").innerHTML = "";
+  try {
+    const r = await fetch("/api/write", {method:"POST", body:formData()});
+    if (!r.ok) throw new Error(await r.text());
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "progress") setProgress(ev.phase, ev.done, ev.total);
+        else if (ev.type === "log") appendLog(ev.msg);
+        else if (ev.type === "error") { appendLog("错误: " + ev.msg, "err"); throw new Error(ev.msg); }
+        else if (ev.type === "done") {
+          $("fill").style.width = "100%";
+          $("phase").textContent = "";
+          appendLog(`完成! 用时 ${ev.seconds}s, 可移开标签。`, "ok");
+        }
+      }
+    }
+  } catch (e) {
+    appendLog("失败: " + e.message, "err");
+  } finally {
+    $("writeBtn").disabled = !curFile;
+  }
+};
+</script>
+</body>
+</html>
