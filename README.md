@@ -29,6 +29,12 @@ bluetag-go.exe stop      # 停止服务 (等待进行中的写卡完成再退出
 bluetag-go.exe remove    # 停止并删除服务
 ```
 
+查看构建版本(无需管理员权限):
+
+```sh
+bluetag-go.exe version   # 如 v1.0-3-gb77c9e0; 也可经 GET /api/status 的 version 字段获取
+```
+
 或 `make install / remove / start / stop`。说明:
 
 - 普通用户执行子命令会**自动弹出 UAC 提权窗口**, 确认后在管理员进程中执行;

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -16,10 +17,18 @@ import (
 // serviceName: 注册到 SCM 的服务名
 const serviceName = "bluetag-go"
 
+// version: 构建版本号, 由 Makefile/CI 通过 -ldflags "-X main.version=..." 注入
+// (未注入时显示 dev)
+var version = "dev"
+
 func main() {
+	server.Version = version
 	// 服务管理子命令 (Windows 实现见 service_windows.go)
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
+		case "version":
+			fmt.Println(version)
+			return
 		case "install", "remove", "start", "stop":
 			if err := serviceCommand(os.Args[1:]); err != nil {
 				log.Fatal(err)

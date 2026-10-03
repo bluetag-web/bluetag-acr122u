@@ -1,7 +1,7 @@
 # bluetag-go — B037 价签写卡服务 (ACR122U)
-# Windows: 无 cgo, make build 即可; 服务模式 make install/remove/start/stop (管理员终端)
+# Windows: 无 cgo, make build / build-windows (交叉编译) 均可; 服务模式 make install/remove/start/stop (管理员终端)
 # Linux:   需 cgo (gcc + pkg-config + libpcsclite-dev), make build-linux
-# 用法: make build / build-linux / run / test / vet / fmt / install / remove / start / stop / clean
+# 用法: make build / build-windows / build-linux / run / test / vet / fmt / install / remove / start / stop / clean
 
 GO      ?= go
 APP     := bluetag-go
@@ -9,8 +9,11 @@ BIN     := bin
 EXT     := $(shell $(GO) env GOEXE)
 TARGET  := $(BIN)/$(APP)$(EXT)
 MAIN    := ./cmd/bluetag
+GIT     ?= git
+# VERSION: 从 git tag 推导 (如 v1.0 / v1.0-3-gb77c9e0 / v1.0-dirty), 无 git 时回退 dev
+VERSION ?= $(shell $(GIT) describe --tags --always --dirty 2>/dev/null || echo dev)
 GOFLAGS ?= -trimpath
-LDFLAGS ?= -s -w
+LDFLAGS ?= -s -w -X main.version=$(VERSION)
 LINUX_ARCH ?= amd64
 WINDOWS_ARCH ?= amd64
 
@@ -24,7 +27,7 @@ build: $(TARGET)
 ##              直接运行; 交叉编译需配置工具链, 如:
 ##              make build-linux CC=x86_64-linux-gnu-gcc
 build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=$(LINUX_ARCH) CC=$(CC) \
+	CGO_ENABLED=1 GOOS=linux GOARCH=$(LINUX_ARCH) $(if $(CC),CC=$(CC)) \
 		$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
 		-o $(BIN)/$(APP)-linux-$(LINUX_ARCH) $(MAIN)
 
@@ -34,8 +37,6 @@ build-windows:
 	CGO_ENABLED=0 GOOS=windows GOARCH=$(WINDOWS_ARCH) \
 		$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
 		-o $(BIN)/$(APP)-windows-$(WINDOWS_ARCH).exe $(MAIN)
-
-## run: 本地开发运行 (go run)
 
 $(TARGET):
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $@ $(MAIN)

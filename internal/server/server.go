@@ -29,6 +29,9 @@ import (
 // DefaultAddr: 默认监听地址 (仅回环, 不对局域网暴露)
 const DefaultAddr = "127.0.0.1:8765"
 
+// Version: 构建版本号, 由入口 (cmd/bluetag) 注入, 经 /api/status 暴露
+var Version = "dev"
+
 var (
 	writeMu sync.Mutex // 同一时间只允许一个写卡任务
 	busy    bool
@@ -127,7 +130,7 @@ func containsUpper(s, sub string) bool {
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	out := map[string]any{"busy": busy}
+	out := map[string]any{"busy": busy, "version": Version}
 	ctx, err := pcsc.EstablishContext()
 	if err == nil {
 		defer ctx.Release()
