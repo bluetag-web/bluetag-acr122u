@@ -23,8 +23,20 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y pkg-config libpcsclite-dev
 
-    - name: build windows release
-      run: make build
+    - name: Test
+      run: go test ./...
 
-    - name: build linux release
-      run: make build-linux 
+    - name: Build Windows release
+      run: make build-windows
+
+    - name: Build Linux release
+      run: make build-linux
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bluetag-go-binaries
+        path: |
+          bin/bluetag-go-windows-*.exe
+          bin/bluetag-go-linux-*
+        if-no-files-found: error

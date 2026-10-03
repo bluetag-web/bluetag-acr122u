@@ -1,11 +1,13 @@
 // Package server — B037 价签写卡 Web 服务 HTTP 层
-//   GET  /            内置网页 (web.IndexHTML, go:embed)
-//   GET  /api/status  读卡器状态
-//   POST /api/upload  上传图片 → 处理 → JSON (统计 + base64 预览)
-//   POST /api/write   上传前端已处理好的 240x416 三色图 → 校验 → 写卡, NDJSON 流式进度
+//
+//	GET  /            内置网页 (web.IndexHTML, go:embed)
+//	GET  /api/status  读卡器状态
+//	POST /api/upload  上传图片 → 处理 → JSON (统计 + base64 预览)
+//	POST /api/write   上传前端已处理好的 240x416 三色图 → 校验 → 写卡, NDJSON 流式进度
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -24,15 +26,18 @@ import (
 	"bluetag-go/web"
 )
 
-const listenAddr = "127.0.0.1:8765"
+// DefaultAddr: 默认监听地址 (仅回环, 不对局域网暴露)
+const DefaultAddr = "127.0.0.1:8765"
 
 var (
 	writeMu sync.Mutex // 同一时间只允许一个写卡任务
 	busy    bool
 )
 
-// Run: 启动 HTTP 服务 (阻塞)
-func Run() error {
+// Serve: 启动 HTTP 服务 (阻塞)。
+// ctx 被取消 (Ctrl+C / Windows 服务 Stop) 时优雅关闭:
+// 先等写卡任务结束 (最长约 25s), 再等待存量请求完成。
+func Serve(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -41,10 +46,27 @@ func Run() error {
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/api/upload", handleUpload)
 	mux.HandleFunc("/api/write", handleWrite)
-	log.Printf("B037 价签写卡服务: http://%s (仅本机监听)", listenAddr)
+	log.Printf("B037 价签写卡服务: http://%s (仅本机监听)", addr)
 	// 仅监听回环地址: 写卡服务涉及本机 USB 读卡器, 不对局域网/公网暴露。
 	// 远程在线设计器页面在浏览器中跨域调用本机 API, 不受影响 (CORS 已开启)。
-	return http.ListenAndServe(listenAddr, cors(mux))
+	srv := &http.Server{Addr: addr, Handler: cors(mux)}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	select {
+	case err := <-errCh:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		// 拿写卡锁 = 等待当前写卡任务跑完 (中断点不可安全打断)
+		log.Println("收到退出信号, 等待写卡任务结束后关闭...")
+		writeMu.Lock()
+		writeMu.Unlock()
+		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(sctx)
+	}
 }
 
 // cors: 跨域中间件 — 供部署在远程服务器上的在线设计器调用 API。

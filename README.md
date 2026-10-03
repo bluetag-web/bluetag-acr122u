@@ -1,6 +1,6 @@
 # bluetag-go
 
-蓝签3.70寸电子工牌 （NFC版）写卡 Web 服务。通过 ACR122U 读卡器(PN532 直连 / Escape APDU) 把图片写入 B037 工牌, 零第三方依赖, 编译产物为单个 Windows 可执行文件。
+蓝签3.70寸电子工牌 （NFC版）写卡 Web 服务。通过 ACR122U 读卡器(PN532 直连 / Escape APDU) 把图片写入 B037 工牌, 唯一第三方依赖为 golang.org/x/sys (仅 Windows 服务支持), 编译产物为单个可执行文件。
 几年前买了这个电子工牌，那时候用华为的Mate 20刷屏显，后来换了Mate 40 Pro，NFC带不起来了，就一直闲置了，最近突然又翻出来了，就使用AI逆向了蓝签的APP，获取到了通信协议，并通过ACR122U成功写入并刷新了屏显。
 支持平台:
 
@@ -17,6 +17,27 @@ make run        # 开发模式运行
 ```
 
 运行后浏览器打开 <http://localhost:8765>。
+
+## 作为 Windows 服务运行
+
+exe 内置服务管理子命令 (需管理员权限的终端):
+
+```sh
+bluetag-go.exe install   # 注册服务: 自动启动, 异常退出 5s 后自动重启
+bluetag-go.exe start     # 启动服务
+bluetag-go.exe stop      # 停止服务 (等待进行中的写卡完成再退出)
+bluetag-go.exe remove    # 停止并删除服务
+```
+
+或 `make install / remove / start / stop`。说明:
+
+- 普通用户执行子命令会**自动弹出 UAC 提权窗口**, 确认后在管理员进程中执行;
+  提权子进程运行在独立控制台, 结束前等待回车以便查看输出 (设置环境变量
+  `BLUETAG_NOPAUSE=1` 可跳过, 供自动化使用)。
+- 双击/命令行直接运行仍为前台模式, 用法不变; `-addr` 可改监听地址。
+- 服务模式下日志写 `%ProgramData%\bluetag-go\service.log` (超过 8MB 轮转为 `.old`)。
+- 服务以 LocalSystem 运行, 访问 PC/SC 无权限问题; 仅监听 `127.0.0.1`, 无需配置防火墙。
+- 上述子命令在 Linux 上明确报错 (Linux 请用 systemd unit 包裹前台进程)。
 
 ## 目录结构 (golang-standards/project-layout)
 

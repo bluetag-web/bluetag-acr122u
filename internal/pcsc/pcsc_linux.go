@@ -108,8 +108,8 @@ func (c *Context) ConnectDirect(reader string) (*Card, error) {
 func getEscapeIoctl(h C.SCARDHANDLE) (uint32, bool) {
 	recv := make([]byte, recvBufLen)
 	var ret C.DWORD
-	rc := C.SCardControl(h, C.DWORD(ioctlGetFeatures), nil, C.DWORD(0),
-		unsafe.Pointer(&recv[0]), C.DWORD(recvBufLen), &ret)
+	rc := C.SCardControl(h, C.DWORD(ioctlGetFeatures), C.LPCVOID(nil), C.DWORD(0),
+		C.LPVOID(unsafe.Pointer(&recv[0])), C.DWORD(recvBufLen), &ret)
 	if rc != 0 || ret < 4 {
 		return 0, false
 	}
@@ -143,8 +143,8 @@ func (card *Card) Control(apdu []byte) ([]byte, []byte, error) {
 	recv := make([]byte, recvBufLen)
 	var ret C.DWORD
 	rc := C.SCardControl(card.h, C.DWORD(card.ioctl),
-		unsafe.Pointer(&apdu[0]), C.DWORD(len(apdu)),
-		unsafe.Pointer(&recv[0]), C.DWORD(recvBufLen), &ret)
+		C.LPCVOID(unsafe.Pointer(&apdu[0])), C.DWORD(len(apdu)),
+		C.LPVOID(unsafe.Pointer(&recv[0])), C.DWORD(recvBufLen), &ret)
 	if rc != 0 {
 		return nil, nil, scardErr("SCardControl", rc)
 	}

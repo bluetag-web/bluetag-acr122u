@@ -1,7 +1,7 @@
 # bluetag-go — B037 价签写卡服务 (ACR122U)
-# Windows: 无 cgo, make build 即可
+# Windows: 无 cgo, make build 即可; 服务模式 make install/remove/start/stop (管理员终端)
 # Linux:   需 cgo (gcc + pkg-config + libpcsclite-dev), make build-linux
-# 用法: make build / build-linux / run / test / vet / fmt / clean
+# 用法: make build / build-linux / run / test / vet / fmt / install / remove / start / stop / clean
 
 GO      ?= go
 APP     := bluetag-go
@@ -12,8 +12,9 @@ MAIN    := ./cmd/bluetag
 GOFLAGS ?= -trimpath
 LDFLAGS ?= -s -w
 LINUX_ARCH ?= amd64
+WINDOWS_ARCH ?= amd64
 
-.PHONY: all build build-linux run test vet fmt clean
+.PHONY: all build build-linux build-windows run test vet fmt install remove start stop clean
 
 all: vet test build
 
@@ -27,6 +28,13 @@ build-linux:
 		$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
 		-o $(BIN)/$(APP)-linux-$(LINUX_ARCH) $(MAIN)
 
+## build-windows: 交叉编译 Windows 版 (任意平台可用, 无需 cgo/C 库)
+##   Windows 版走 winscard syscall, 不需要 cgo, Linux/macOS CI 可直接产出
+build-windows:
+	CGO_ENABLED=0 GOOS=windows GOARCH=$(WINDOWS_ARCH) \
+		$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" \
+		-o $(BIN)/$(APP)-windows-$(WINDOWS_ARCH).exe $(MAIN)
+
 ## run: 本地开发运行 (go run)
 
 $(TARGET):
@@ -35,6 +43,16 @@ $(TARGET):
 ## run: 本地开发运行 (go run)
 run:
 	$(GO) run $(MAIN)
+
+## install/remove/start/stop: Windows 服务管理 (需管理员权限的终端)
+install: $(TARGET)
+	$(TARGET) install
+remove: $(TARGET)
+	$(TARGET) remove
+start: $(TARGET)
+	$(TARGET) start
+stop: $(TARGET)
+	$(TARGET) stop
 
 ## test: 运行全部单元测试
 test:
