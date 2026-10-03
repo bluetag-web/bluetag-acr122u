@@ -19,6 +19,10 @@ jobs:
       with:
         go-version: '1.27'
 
+    - name: Install PC/SC dev libraries
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y pkg-config libpcsclite-dev
+
     - name: build windows release
       run: make build
 
