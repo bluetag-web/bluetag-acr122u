@@ -2,10 +2,10 @@ name: Makefile CI
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
+    tags: [ "v*" ]        # 仅打版本 tag 时构建并发布 Release
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main" ]  # PR 仍做测试与构建检查
+  workflow_dispatch:      # 支持在 Actions 页面手动触发
 
 jobs:
   build:
