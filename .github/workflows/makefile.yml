@@ -49,6 +49,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 Release 需要; build job 仍保持默认只读
     steps:
       - uses: actions/download-artifact@v4
         with:
