@@ -4,6 +4,7 @@
 //	GET  /api/status  读卡器状态
 //	POST /api/upload  上传图片 → 处理 → JSON (统计 + base64 预览)
 //	POST /api/write   上传前端已处理好的 240x416 三色图 → 校验 → 写卡, NDJSON 流式进度
+//	POST /api/validate 上传前端已处理好的 240x416 三色图 → 仅校验 (不写卡), JSON 结果
 package server
 
 import (
@@ -49,6 +50,7 @@ func Serve(ctx context.Context, addr string) error {
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/api/upload", handleUpload)
 	mux.HandleFunc("/api/write", handleWrite)
+	mux.HandleFunc("/api/validate", handleValidate)
 	log.Printf("B037 价签写卡服务: http://%s (仅本机监听)", addr)
 	// 仅监听回环地址: 写卡服务涉及本机 USB 读卡器, 不对局域网/公网暴露。
 	// 远程在线设计器页面在浏览器中跨域调用本机 API, 不受影响 (CORS 已开启)。
@@ -261,5 +263,29 @@ func handleWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	writeEvent(w, map[string]any{
 		"type": "done", "seconds": fmt.Sprintf("%.1f", time.Since(start).Seconds()),
+	})
+}
+
+// handleValidate: 只校验不写卡 — 复用 /api/write 的图片校验逻辑 (imaging.ValidateImage),
+// 校验通过后不触碰读卡器与标签, 供前端在写入前做预检。
+// 不占用写卡锁 (不碰硬件), 写卡进行中也可调用。
+func handleValidate(w http.ResponseWriter, r *http.Request) {
+	data, err := readImageFile(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// 与 /api/write 相同的校验: 240x416 纯三色, 不做任何图像处理;
+	// 镜像在 ValidateImage 打包层完成, 此处仅丢弃打包结果。
+	bw, rd, white, black, red, err := imaging.ValidateImage(data)
+	if err != nil {
+		http.Error(w, "图片校验失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":    true,
+		"white": white, "black": black, "red": red,
+		"bwLen": len(bw), "rdLen": len(rd),
 	})
 }

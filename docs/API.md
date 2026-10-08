@@ -57,9 +57,9 @@ multipart: request Content-Type isn't multipart/form-data
 处理管线:解码 → 缩放(240×416)→ 红色掩码 → 黑白二值(阈值/抖动)→ 打包。
 注:面板行扫描 x 方向与数据相反,镜像在写卡打包层完成,**预览与统计均为原图方向**。
 
-### `/api/write` 的输入契约(不做任何图像处理)
+### `/api/write` / `/api/validate` 的输入契约(不做任何图像处理)
 
-`/api/write` **不处理图片**,只校验后打包写卡。缩放、红判定、二值化/抖动全部由前端完成。
+`/api/write` 与 `/api/validate` **均不处理图片**,只校验(后者不写卡)。缩放、红判定、二值化/抖动全部由前端完成。
 前端处理管线(与内置网页 `index.html` 中的 JS 实现一致):
 
 1. 缩放到 240×416(`stretch` 拉伸铺满,或等比缩放白底居中)
@@ -75,7 +75,7 @@ multipart: request Content-Type isn't multipart/form-data
 - 错误信息列出前 3 个违规像素坐标,如 `(x=123,y=45)=RGB(128,64,32) 不是纯白/纯黑/纯红`
 
 镜像(**仍在服务端打包层完成**)——前端 canvas 上的方向即最终屏幕显示方向,无需自行翻转。
-旧的表单参数 `threshold`/`redMin`/`redDiff`/`dither`/`stretch` 对 `/api/write` 已无效,收到即忽略。
+旧的表单参数 `threshold`/`redMin`/`redDiff`/`dither`/`stretch` 对 `/api/write` 与 `/api/validate` 均已无效,收到即忽略。
 
 ---
 
@@ -289,14 +289,62 @@ for line in r.iter_lines(decode_unicode=True):
 
 ---
 
-## 4. GET / — 内置网页
+## 4. POST /api/validate — 仅校验图片(不写卡)
+
+与 `/api/write` 使用**完全相同的校验逻辑**(240×416 纯三色,见"全局约定"的输入契约),
+但校验通过后**不触碰读卡器与标签**,适合前端在正式写入前做预检。
+不占用写卡锁——即使写卡任务进行中也可调用(响应中不含 `busy` 信息)。
+
+**请求**(`multipart/form-data`,只有 `image` 字段有效)
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/validate -F "image=@design.png"
+```
+
+**响应 200**(`application/json`)
+
+```json
+{
+  "ok": true,
+  "white": 56363,
+  "black": 43477,
+  "red": 44468,
+  "bwLen": 12480,
+  "rdLen": 12480
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | bool | 恒为 `true`(失败时走 400) |
+| `white` / `black` / `red` | int | 白 / 黑 / 红 像素数 |
+| `bwLen` / `rdLen` | int | 打包后通道字节数,恒为 12480 |
+
+**错误**:400,纯文本原因,与 `/api/write` 的校验失败信息一致
+(非 multipart / 缺 `image` / 解码失败 / 尺寸不对 / 含非法像素等)。
+
+**JS 示例**
+
+```js
+async function validateTag(processedBlob) {
+  const fd = new FormData();
+  fd.append("image", processedBlob, "design.png");
+  const resp = await fetch("http://127.0.0.1:8765/api/validate", {method: "POST", body: fd});
+  if (!resp.ok) throw new Error(await resp.text()); // 校验失败 (尺寸/非三色像素)
+  return await resp.json(); // {ok, white, black, red, bwLen, rdLen}
+}
+```
+
+---
+
+## 5. GET / — 内置网页
 
 返回 `index.html`(需与 exe 同目录,启动时读入内存)。
 设计器部署后可完全替代此页面,后端只依赖上述三个 API。
 
 ---
 
-## 5. 部署与运维备注
+## 6. 部署与运维备注
 
 - **启动**:`bluetag-go.exe`(与 `index.html` 同目录);前台运行,Ctrl+C 停止
 - **重启前先结束旧进程**:否则新实例因端口占用而启动失败(log.Fatal 退出)
